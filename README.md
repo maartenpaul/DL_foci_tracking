@@ -19,8 +19,6 @@ The script will return the following files in the selected output folder:
  - ####stack_masked_registered.tif - cropped images of the tracked nuclei with the signal outside the nucleus removed and registered with HyperstackReg
  - ####stack.zip - ROIs of the segmented nucleus track
  - NucleiTracks.txt - a list of all the segmented nuclei with their image features, more info can be found of these features at the TrackMate website https://imagej.net/plugins/trackmate/
- - exportTracks.xml - XML file that allows to load the results in TrackMate for 
+ - exportTracks.xml - XML file that allows to load the results in TrackMate for visualization of adjustment of the tracking results
+ 
 Contact: Maarten Paul, Erasmus MC, Rotterdam (m.w.paul@erasmusmc.nl)
-
-
-Contact: Maarten Paul, m.w.paul@erasmusmc.nl
