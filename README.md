@@ -8,6 +8,7 @@ Script to segment and track nuclei in a time lapse movie using Stardist and Trac
  - TrackMate-StarDist
  - StarDist
  - CSBdeep
+ 
 In addition it requires 
  - Installation of  HyperStackReg_.class in the Fiji.app/plugin folder https://github.com/ved-sharma/HyperStackReg
  - copy the plugin "TrackMate_examples-ExtractStackWithoutDialog.jar" from this Github repository in the Fiji.app/plugin folder
