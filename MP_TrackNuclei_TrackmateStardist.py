@@ -45,6 +45,16 @@ import fiji.plugin.trackmate.action.LabelImgExporter as LabelImgExporter
 import plugin.trackmate.examples.action.ExtractTrackStackActionMP as ExtractTrackStackActionMP
 from java.util import Collections, ArrayList
 import java.awt.Frame as Frame
+ 
+def center_roi(imp):
+	roiImp = imp.getRoi()
+	impDimensions = imp.getDimensions()
+	bounds = roiImp.getBounds()
+	offset_x = (impDimensions[0]/2)-(bounds.getWidth()/2)
+	offset_y = (impDimensions[1]/2)-(bounds.getHeight()/2)
+	roiImp.setLocation(offset_x,offset_y)
+	imp.setRoi(roiImp)
+	return imp
 
 # Get currently selected image
 imp= IJ.getImage()
@@ -198,7 +208,6 @@ for trackID in trackIDs:
 	#clean up signal outside the ROIs in all frames of the stack
 	number_roi = rm.getCount()
 	number_of_ch = imp.getDimensions()[2]
-	print(number_of_ch)
 	rm.runCommand("Sort")
 	for i in range(number_roi):
 		rm.select(i)
@@ -206,7 +215,7 @@ for trackID in trackIDs:
 		for j in range(number_of_ch):
 			imp.setC(j+1)
 			imp.setT(i+1)
-			IJ.run("center roi ")
+			imp=center_roi(imp)
 			IJ.run("Clear Outside", "slice")
 	IJ.run("Select None")
 	stackname=str(spotID)+"stack_masked.tif"
