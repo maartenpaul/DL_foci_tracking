@@ -13,7 +13,7 @@ Jython script to segment and track nuclei in a time lapse movie using Stardist a
  
 In addition it requires:
  - Installation of  HyperStackReg_.class in the Fiji.app/plugin folder https://github.com/ved-sharma/HyperStackReg
- - copy the plugin "TrackMate_examples-ExtractStackWithoutDialog.jar" from this Github repository in the Fiji.app/plugin folder
+ - copy the plugin "TrackMate-ExtractStackWithoutDialog.jar" from this Github repository in the Fiji.app/plugin folder
  
 The script will return the following files in the selected output folder:
  - labelmap.tif - labelmap of the tracked nuclei
