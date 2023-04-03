@@ -1,21 +1,21 @@
-#@ File (label="Select folder for ",style="directory") outputfolder
-#@ Integer (label = "Segmentation channel", value = 1) segmentationChannel
-#@ Integer (label = "Minimum nucleus area", value = 100) minNucleusArea
-#@ Integer (label = "Maximum nucleus area", value = 10000) maxNucleusArea
-#@ Integer (label = "Minimum nucleus track length (frames)", value = 4) minTrackLength
-#@ Double (label="Downscale",min=1.0,max=10.0, value=1.0) downscale
-#@ Double (label="Saturate",min=0.0,max=100.0, value=0.0) saturate
-#@ Boolean (label = "Register nuclei in track stacks?", value=true) registerNucleus
+#@ File[] (label = "Input files", style="File") files
+#@ File (label="Select folder for ",style="directory") outputFolder
+#@ Integer (label="target channel",min=1,max=10, value=1) targetchannel
+#@ String (label = "Segmentation method", choices={"DoG spot detector", "Ilastik segmentation"}, style="listBox") spotDetector
+#@ String (value="DoG spot detector options", visibility="MESSAGE") DoGMessage
+#@ Double(label="Spot diameter",value=0.5) spotRadius
+#@ Double(label="Quality threshold (spot detection)",value=50.0) spotDiameter
+#@ String (value="Ilastik spot detector options", visibility="MESSAGE") IlastikMessage
+#@ File (label="Select folder with model",style="file") modelfolder
+#@ Integer (label="Class index",min=1,max=10, value=1) classindex
+#@ String (value="Tracking options", visibility="MESSAGE") IlastikMessage
+#@ Double(label="Linking Max Distance (um)",value=1.0) maxDistance
+#@ Boolean (label = "Allow Gap Closing?", value=true) allowGap
+#@ Integer(label="Maximum Gap (frames)",value=1) maxGap
+#@ Double(label="Linking Max Distance (um)",value=1.0) maxGapDistance
+#To be added parameters for track splitting an merging
 
-# Script to segment and track nuclei in a time lapse movie using Stardist and Trackmate and export tracked nuclei to separate image Stacks
-# To run the script you need to activate the following Fiji update sites:
-# - TrackMate
-# - TrackMate-StarDist
-# - StarDist
-# - CSBdeep
-# The script will return the following files:
-# - exportTracks.xml
-# Author: Maarten Paul, Erasmus MC, Rotterdam (m.w.paul@erasmusmc.nl)
+	
 
 import sys
 import os
@@ -23,7 +23,6 @@ from ij import IJ
 from ij import WindowManager
 from java.io import File
 from ij.plugin.frame import RoiManager
-import ij.plugin.Duplicator as Duplicator
 from ij.measure import ResultsTable
 from fiji.plugin.trackmate.io import TmXmlWriter
 from fiji.plugin.trackmate import Model
@@ -31,250 +30,206 @@ from fiji.plugin.trackmate import Settings
 from fiji.plugin.trackmate import TrackMate
 from fiji.plugin.trackmate import SelectionModel
 from fiji.plugin.trackmate import Logger
-from fiji.plugin.trackmate.stardist import StarDistDetectorFactory
+from fiji.plugin.trackmate.detection import DogDetectorFactory
 from fiji.plugin.trackmate.tracking.jaqaman import LAPUtils
-from fiji.plugin.trackmate.tracking.overlap import OverlapTrackerFactory
+from fiji.plugin.trackmate.tracking.jaqaman import SparseLAPTrackerFactory
+from fiji.plugin.trackmate.ilastik import IlastikDetectorFactory
 from fiji.plugin.trackmate.gui.displaysettings import DisplaySettingsIO
 from fiji.plugin.trackmate.gui.displaysettings import DisplaySettings
+from fiji.plugin.trackmate.action.fit import SpotFitterController
 import fiji.plugin.trackmate.visualization.hyperstack.HyperStackDisplayer as HyperStackDisplayer
 import fiji.plugin.trackmate.features.FeatureFilter as FeatureFilter
 import fiji.plugin.trackmate.action.IJRoiExporter as IJRoiExporter
 import fiji.plugin.trackmate.action.ExportTracksToXML as ExportTracksToXML
-import fiji.plugin.trackmate.action.ExtractTrackStackAction as ExtractTrackStackAction
-import fiji.plugin.trackmate.action.LabelImgExporter as LabelImgExporter
-import plugin.trackmate.examples.action.ExtractTrackStackActionMP as ExtractTrackStackActionMP
+#import fiji.plugin.trackmate.action.ExtractTrackStackAction as ExtractTrackStackAction
 from java.util import Collections, ArrayList
 import java.awt.Frame as Frame
-import java.awt.Rectangle as Rectangle
- 
-def center_roi(imp,roi):
-	impDimensions = imp.getDimensions()
-	roi=imp.getRoi()
-	bounds = roi.getBounds()
-	offset_x = (bounds.getWidth()/2)-(impDimensions[0]/2)
-	offset_y = (bounds.getHeight()/2)-(impDimensions[1]/2)
-	roi.setLocation(offset_x, offset_y))
-	imp.setRoi(roi)
 
-# Get currently selected image
-imp= IJ.getImage()
-imp_dimensions=imp.getDimensions() #width, height, nChannels, nSlices, nFrames
-imp_temp = Duplicator().run(imp,segmentationChannel,segmentationChannel,1,imp_dimensions[3],1,imp_dimensions[4])
-imp_temp.show()
-#imp_temp.show()
-if saturate>0.0:
-	IJ.run(imp_temp,"Enhance Contrast...", "saturated="+str(saturate)+" process_all")
-
-reload(sys)
-
-sys.setdefaultencoding('utf-8')
-
-# when downscaling for StarDist include an additional routine to use a label image 
-if downscale != 1.0:
-
-	x = imp_temp.getDimensions()[0]
-	y = imp_temp.getDimensions()[1]
-	IJ.run(imp_temp,"Size...", "width=" + str(x/downscale) + " height="+ str(y/downscale) +" constrain interpolation=None")
+def trackFoci(outputFolder,filename,imp,spotDetector):
+	outFile = File(outputFolder, filename+"exportTracks.xml")
+	# We have to do the following to avoid errors with UTF8 chars generated in 
+	# TrackMate that will mess with our Fiji Jython.
+	reload(sys)
+	sys.setdefaultencoding('utf-8')
 		
-#----------------------------
-# Create the model object now
-#----------------------------
- 
-# Some of the parameters we configure below need to have
-# a reference to the model at creation. So we create an
-# empty model now.
+	#----------------------------
+	# Create the model object now
+	#----------------------------
 	 
-model = Model()
+	# Some of the parameters we configure below need to have
+	# a reference to the model at creation. So we create an
+	# empty model now.
 	 
-# Send all messages to ImageJ log window.
-model.setLogger(Logger.IJ_LOGGER)
-
-#------------------------
-# Prepare settings object
-#------------------------
+	model = Model()
 	 
-settings = Settings(imp_temp)
-	 
-# Configure detector - We use the Strings for the keys
-settings.detectorFactory = StarDistDetectorFactory()
-settings.detectorSettings = {
-    'TARGET_CHANNEL' : segmentationChannel,
-}  
-# Configure spot filters - Classical filter on quality
-filter1 = FeatureFilter('AREA', minNucleusArea, True)
-settings.addSpotFilter(filter1)
-filter2 = FeatureFilter('AREA', maxNucleusArea, False)
-settings.addSpotFilter(filter2)
-
-# Configure tracker - We want to allow merges and fusions
-settings.trackerFactory = OverlapTrackerFactory()
-settings.trackerSettings['IOU_CALCULATION'] = "PRECISE"
-settings.trackerSettings['MIN_IOU'] = 0.5
-settings.trackerSettings['SCALE_FACTOR'] = 1.0
- 
-# Add ALL the feature analyzers known to TrackMate. They will 
-# yield numerical features for the results, such as speed, mean intensity etc.
-settings.addAllAnalyzers()
-
-# Filter on track length
-filter3 = FeatureFilter('NUMBER_SPOTS', minTrackLength, True)
-settings.addTrackFilter(filter3)
-
-#-------------------
-# Instantiate plugin
-#-------------------
-	 
-trackmate = TrackMate(model, settings)
-#--------
-# Process
-#--------
-	 
-ok = trackmate.checkInput()
-if not ok:
-	sys.exit(str(trackmate.getErrorMessage()))
-	 
-ok = trackmate.process()
-if not ok:
-    sys.exit(str(trackmate.getErrorMessage()))
-
- #----------------
-# Display results
-#----------------
- 
-# A selection.
-selectionModel = SelectionModel( model )
-
-# Read the default display settings.
-ds = DisplaySettingsIO.readUserDefault()
-
-label_imp=LabelImgExporter.createLabelImagePlus(trackmate,False,True,False)
-label_imp.show()
-IJ.run(label_imp,"Size...", "width=" + str(x) + " height="+ str(y) +" constrain interpolation=None")
-file_name = File(outputfolder,"labelmap.tif")
-IJ.saveAsTiff(label_imp,file_name.getAbsolutePath())
-label_imp.close()
-
-#project tracks on original image
-imp.show()
-settings=settings.copyOn(imp)
-trackmate = TrackMate(model, settings)
-imp_temp.changes = False
-imp_temp.close()
-
-displayer =  HyperStackDisplayer( model, selectionModel, imp, ds )
-displayer.render()
-displayer.refresh()
-
-# Echo results with the logger we set at start:
-model.getLogger().log( str( model ) )
-
-fm = model.getFeatureModel()
-
-#prepare the stacks with nuclei
-trackIDs = ArrayList(model.getTrackModel().trackIDs(True))
-Frame = Frame()
-####create cropped and aligned nuclei movies
-for trackID in trackIDs: 
-	selectionModel.clearSelection()
-	disp = DisplaySettings()
-	track = ArrayList(model.getTrackModel().trackSpots(trackID))
-	spot = track[0]
-	spotID = spot.ID()
-	selectionModel.addSpotToSelection(spot)
-	ETSA = ExtractTrackStackActionMP()
+	# Send all messages to ImageJ log window.
+	model.setLogger(Logger.IJ_LOGGER)
 	
-	stackTrack = ETSA.execute(trackmate,selectionModel,disp,Frame)
+	#------------------------
+	# Prepare settings object
+	#------------------------
+	 
+	settings = Settings(imp)
+	if spotDetector=="DoG spot detector":
+		detectFociDoG(settings)
 	
-#save trackstack with trackID
-	stackname=str(spotID)+"stack.tif"
-	file_name = File(outputfolder,stackname)
-	imp= IJ.getImage()
-	IJ.saveAsTiff(imp,file_name.getAbsolutePath())
+	elif spotDetector=="Ilastik segmentation":
+		detectFociIlastik(settings)
+	
+	# Configure detector - We use the Strings for the keys
+	
+	# Configure tracker - We want to allow merges and fusions
+	settings.trackerFactory = SparseLAPTrackerFactory()
+	settings.trackerSettings = settings.trackerFactory.getDefaultSettings() # almost good enough
 
-#obtain ROIs from track
+	settings.trackerSettings['LINKING_MAX_DISTANCE']  = maxDistance
+	settings.trackerSettings['ALLOW_GAP_CLOSING'] = allowGap
+	settings.trackerSettings['MAX_FRAME_GAP'] = maxGap
+	settings.trackerSettings['GAP_CLOSING_MAX_DISTANCE']  = maxGapDistance
+	settings.trackerSettings['ALLOW_TRACK_SPLITTING'] = False
+	settings.trackerSettings['SPLITTING_MAX_DISTANCE'] = 1.0
+	settings.trackerSettings['ALLOW_TRACK_MERGING'] = False
+	settings.trackerSettings['MERGING_MAX_DISTANCE'] = 1.0
+	
+	# Add ALL the feature analyzers known to TrackMate. They will 
+	# yield numerical features for the results, such as speed, mean intensity etc.
+	settings.addAllAnalyzers()
+	 
+	#-------------------
+	# Instantiate plugin
+	#-------------------
+	 
+	trackmate = TrackMate(model, settings)
+	 
+	#--------
+	# Process
+	#--------
+	 
+	ok = trackmate.checkInput()
+	if not ok:
+	    sys.exit(str(trackmate.getErrorMessage()))
+	 
+	ok = trackmate.process()
+	if not ok:
+	    sys.exit(str(trackmate.getErrorMessage()))
+	
+	 #----------------
+	# Display results
+	#----------------
+	 
+	# A selection.
+	selectionModel = SelectionModel( model )
+	 
+	# Read the default display settings.
+	ds = DisplaySettingsIO.readUserDefault()
+	 
+#	displayer =  HyperStackDisplayer( model, selectionModel, imp, ds )
+#	displayer.render()
+#	displayer.refresh()
+	
+	# Echo results with the logger we set at start:
+	model.getLogger().log( str( model ) )
+	
+	fm = model.getFeatureModel()
+	
+	trackIDs = ArrayList(model.getTrackModel().trackIDs(True))
+	
+	#controller = SpotFitterController(trackmate,selectionModel,model.getLogger().log( str( model ) ))
+	#controller.show()
+	
+	#initiate new results table
+	rt = ResultsTable()
+	
+	# Iterate over all the tracks that are visible.
+	for id in model.getTrackModel().trackIDs(True):
+	 
+	    # Fetch the track feature from the feature model. 
+		# Get all the spots of the current track.
+		# write to resultsTable
+	    track = model.getTrackModel().trackSpots(id)
+	    for spot in track:
+	        sid = spot.ID()
+	        x=spot.getFeature('POSITION_X')
+	        y=spot.getFeature('POSITION_Y')
+	        t=spot.getFeature('FRAME')
+	        q=spot.getFeature('QUALITY')
+	        snr=spot.getFeature('SNR_CH1')
+	        mean=spot.getFeature('MEAN_INTENSITY_CH1')
+	        mean_ch3=spot.getFeature('MEAN_INTENSITY_CH3')
+	        radius=spot.getFeature('RADIUS')
+	        model.getLogger().log('\tspot ID = ' + str(sid) + ','+str(x)+','+str(y)+','+str(t)+','+str(q) + ','+str(snr) + ',' + str(mean)+","+str(id))
+	        rt.addValue("sid",sid)
+	        rt.addValue("x",x)
+	        rt.addValue("y",y)
+	        rt.addValue("t",t)
+	        rt.addValue("q",snr)
+	        rt.addValue("mean",mean)
+	        rt.addValue("mean_ch3",mean_ch3)
+	        rt.addValue("radius",radius)
+	        rt.addValue("tid",id)
+	        rt.addRow()
+	
+#	rt.show("ResultsTable")
+	
+	rt_file = File(outputFolder ,filename+"FociTracks.txt")
+	rt.save(rt_file.getAbsolutePath())
+	rt.reset()
+	
+	#outFile = File(outputFolder, filename+"exportFociTracks.xml")
+	#ExportTracksToXML.export(model, settings, outFile)
+	outFile_TMXML= File(outputFolder, filename+"exportFociXML.xml")
+	
+	writer = TmXmlWriter(outFile_TMXML) #a File path object
+	writer.appendModel(trackmate.getModel()) #trackmate instantiate like this before trackmate = TrackMate(model, settings)
+	writer.appendSettings(trackmate.getSettings())
+	writer.writeToFile()
+	
 	rm = RoiManager.getInstance()
 	if not rm:
 	      rm = RoiManager()
 	rm.reset()
-	selectionModel.clearSelection()
-	selectionModel.addSpotToSelection(track)
-	spots = ArrayList(model.getTrackModel().trackSpots(trackID))
+	
+	spots = trackmate.getModel().getSpots().iterable(True)
 	exporter = IJRoiExporter(trackmate.getSettings().imp, model.getLogger())
 	exporter.export(spots)
 	rm = RoiManager.getInstance()
 	rm.runCommand("Select All")
-	roi_name = File(outputfolder,str(spotID)+"stack.zip")
+	roi_name = File(outputFolder,filename+"FociROI.zip")
 	rm.runCommand("Save", roi_name.getAbsolutePath())
-	#clean up signal outside the ROIs in all frames of the stack
-	number_roi = rm.getCount()
-	number_of_ch = imp.getDimensions()[2]
-	rm.runCommand("Sort")
-	for i in range(number_roi):
-		rm.select(i)
-		slice = imp.getSlice()
-		for j in range(number_of_ch):
-			imp.setC(j+1)
-			imp.setT(i+1)
-			center_roi(imp)
-			IJ.run("Clear Outside", "slice")
-	IJ.run("Select None")
-	stackname=str(spotID)+"stack_masked.tif"
-	file_name = File(outputfolder,stackname)
-	IJ.saveAsTiff(imp,file_name.getAbsolutePath())
-	if registerNucleus:
-		channelsToReg = "channel"
-		nChannels = imp_dimensions=imp.getDimensions()[2] #width, height, nChannels, nSlices, nFrames
-		for i in range(1,nChannels):
-			channelsToReg = channelsToReg+" channel_"+str(i-1)
-		IJ.run(imp,"HyperStackReg ", "transformation=[Rigid Body] "+channelsToReg+"")
-		stackname=str(spotID)+"stack_masked_registered.tif"
-		file_name = File(outputfolder,stackname)
-		imp_reg= IJ.getImage()
-		IJ.saveAsTiff(imp_reg,file_name.getAbsolutePath())
-		imp_reg.close()
+
+def detectFociIlastik(settings):
+	# Configure detector - We use the Strings for the keys
+	settings.detectorFactory = IlastikDetectorFactory()
+	settings.detectorSettings = {
+    'CLASSIFIER_FILEPATH' : modelfolder.getAbsolutePath(),
+    'TARGET_CHANNEL' : targetchannel,
+    'CLASS_INDEX' : classindex,
+    'PROBA_THRESHOLD' : 0.5,  
+	}  
+	return settings
+	
+def detectFociDoG(settings):
+	settings.detectorFactory = DogDetectorFactory()
+	settings.detectorSettings = {
+	    'DO_SUBPIXEL_LOCALIZATION' : True,
+	    'RADIUS' : spotDiameter/2, #in TrackMate GUI diameter is used so for consistancy also use diameter instead of spot radius
+	    'TARGET_CHANNEL' : targetchannel,
+	    'THRESHOLD' : 100.0,
+	    'DO_MEDIAN_FILTERING' : False,  
+	}  
+	return settings
+	 
+imageN = 0	
+totalN = len(files)
+for file in files:
+	imageN=imageN+1
+	IJ.showStatus("Detecting foci in image "+str(imageN)+" of a total of "+ str(totalN)+"")
+	IJ.showProgress(imageN,totalN)
+	filename = file.getName()
+	filename=filename.split("_")
+	imp = IJ.openImage(file.getAbsolutePath())
+	trackFoci(outputFolder,filename[0],imp,spotDetector)
+	imp.changes = False
 	imp.close()
-		
-####
 
-#initiate new results table
-rt = ResultsTable()
 
-# Iterate over all the tracks that are visible.
-for id in model.getTrackModel().trackIDs(True):
- 
-    # Fetch the track feature from the feature model. 
-	# Get all the spots of the current track.
-	# write to resultsTable
-    track = model.getTrackModel().trackSpots(id)
-    for spot in track:
-        sid = spot.ID()
-        x=spot.getFeature('POSITION_X')
-        y=spot.getFeature('POSITION_Y')
-        t=spot.getFeature('FRAME')
-        q=spot.getFeature('QUALITY')
-        snr=spot.getFeature('SNR_CH1')
-        mean=spot.getFeature('MEAN_INTENSITY_CH1')
-        model.getLogger().log('\tspot ID = ' + str(sid) + ','+str(x)+','+str(y)+','+str(t)+','+str(q) + ','+str(snr) + ',' + str(mean)+","+str(id))
-        rt.addValue("sid",sid)
-        rt.addValue("x",x)
-        rt.addValue("y",y)
-        rt.addValue("t",t)
-        rt.addValue("q",snr)
-        rt.addValue("mean",mean)
-        rt.addValue("tid",id)
-        rt.addRow()
-
-rt.show("ResultsTable")
-
-rt_file = File(outputfolder ,"NucleiTracks.txt")
-rt.save(rt_file.getAbsolutePath())
-rt.reset()
-
-#outFile = File(outputfolder, "exportTracks.xml")
-#ExportTracksToXML.export(model, settings, outFile)
-outFile_TMXML= File(outputfolder, "exportXML.xml")
-
-writer = TmXmlWriter(outFile_TMXML) #a File path object
-writer.appendModel(trackmate.getModel()) #trackmate instantiate like this before trackmate = TrackMate(model, settings)
-writer.appendSettings(trackmate.getSettings())
-writer.writeToFile()
