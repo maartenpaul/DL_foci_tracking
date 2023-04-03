@@ -111,7 +111,7 @@ def trackFoci(outputFolder,filename,imp,spotDetector):
 	 
 	ok = trackmate.process()
 	if not ok:
-	    sys.exit(str(trackmate.getErrorMessage()))
+	    return
 	
 	 #----------------
 	# Display results
