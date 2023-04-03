@@ -14,7 +14,16 @@ Jython script to segment and track nuclei in a time lapse movie using Stardist a
 In addition it requires:
  - Installation of  HyperStackReg_.class in the Fiji.app/plugin folder https://github.com/ved-sharma/HyperStackReg
  - copy the plugin "TrackMate-ExtractStackWithoutDialog.jar" from this Github repository in the Fiji.app/plugin folder
+
+Input:
+ - Output folder: select a folder where all files will be saved
+ - Segmentation channel: channel that will be used to detect the foci
+ - Minimum/maximum nucleus area: The minimum and maximum size of individual nucleus to be considered in tracking of the nuclei
+ - Minimum nucleus track length: the minimum length a nucleus need to be tracked to be further analyzed
+ - Downscale: Factor to downscale images with before applying StartDist nucleus segmmentation. Reducing the size of the nuclei can improve the segmentation of the nuclei using the default StartDist model. The downscaling is only used to segment the nuclei, but original images are used to export the data.
+ - Saturate: % of pixels to saturate before doing segmentation with Stardist. When a channel with nuclei that contain repair foci is used, saturation of the image can improve the nucleuar segmentation. The saturated image is only used to segment the nuclei, but original images are used to export the data.
  
+
 The script will return the following files in the selected output folder:
  - labelmap.tif - labelmap of the tracked nuclei
  - ####stack.tif - cropped images of the tracked nuclei
