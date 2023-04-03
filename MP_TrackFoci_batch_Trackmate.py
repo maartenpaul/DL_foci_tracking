@@ -3,12 +3,12 @@
 #@ Integer (label="target channel",min=1,max=10, value=1) targetchannel
 #@ String (label = "Segmentation method", choices={"DoG spot detector", "Ilastik segmentation"}, style="listBox") spotDetector
 #@ String (value="DoG spot detector options", visibility="MESSAGE") DoGMessage
-#@ Double(label="Spot diameter",value=0.5) spotRadius
-#@ Double(label="Quality threshold (spot detection)",value=50.0) spotDiameter
+#@ Double(label="Spot diameter",value=0.5) spotDiameter
+#@ Double(label="Quality threshold (spot detection)",value=50.0) spotQuality
 #@ String (value="Ilastik spot detector options", visibility="MESSAGE") IlastikMessage
-#@ File (label="Select folder with model",style="file") modelfolder
+#@ File (label="Select Ilastik model file",style="file") modelfolder
 #@ Integer (label="Class index",min=1,max=10, value=1) classindex
-#@ String (value="Tracking options", visibility="MESSAGE") IlastikMessage
+#@ String (value="Tracking options", visibility="MESSAGE") TrackMessage
 #@ Double(label="Linking Max Distance (um)",value=1.0) maxDistance
 #@ Boolean (label = "Allow Gap Closing?", value=true) allowGap
 #@ Integer(label="Maximum Gap (frames)",value=1) maxGap
@@ -214,7 +214,7 @@ def detectFociDoG(settings):
 	    'DO_SUBPIXEL_LOCALIZATION' : True,
 	    'RADIUS' : spotDiameter/2, #in TrackMate GUI diameter is used so for consistancy also use diameter instead of spot radius
 	    'TARGET_CHANNEL' : targetchannel,
-	    'THRESHOLD' : 100.0,
+	    'THRESHOLD' : spotQuality,
 	    'DO_MEDIAN_FILTERING' : False,  
 	}  
 	return settings
