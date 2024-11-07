@@ -2,20 +2,18 @@
 #@ File (label="Select folder for ",style="directory") outputFolder
 #@ Integer (label="target channel",min=1,max=10, value=1) targetchannel
 #@ String (label = "Segmentation method", choices={"DoG spot detector", "Ilastik segmentation"}, style="listBox") spotDetector
-#@ String (value="DoG spot detector options", visibility="MESSAGE") DoGMessage
+#@ String (value="DoG spot detector options", visibility="MESSAGE",required=false) DoGMessage
 #@ Double(label="Spot diameter",value=0.5) spotDiameter
 #@ Double(label="Quality threshold (spot detection)",value=50.0) spotQuality
-#@ String (value="Ilastik spot detector options", visibility="MESSAGE") IlastikMessage
-#@ File (label="Select Ilastik model file",style="file") modelfolder
+#@ String (value="Ilastik spot detector options", visibility="MESSAGE",required=false) IlastikMessage
+#@ File (label="Select Ilastik model file",style="file",default="C:/") modelfolder
 #@ Integer (label="Class index",min=1,max=10, value=1) classindex
-#@ String (value="Tracking options", visibility="MESSAGE") TrackMessage
+#@ String (value="Tracking options", visibility="MESSAGE",required=false) TrackMessage
 #@ Double(label="Linking Max Distance (um)",value=1.0) maxDistance
 #@ Boolean (label = "Allow Gap Closing?", value=true) allowGap
 #@ Integer(label="Maximum Gap (frames)",value=1) maxGap
 #@ Double(label="Linking Max Distance (um)",value=1.0) maxGapDistance
 #To be added parameters for track splitting an merging
-
-	
 
 import sys
 import os
@@ -134,9 +132,6 @@ def trackFoci(outputFolder,filename,imp,spotDetector):
 	
 	trackIDs = ArrayList(model.getTrackModel().trackIDs(True))
 	
-	#controller = SpotFitterController(trackmate,selectionModel,model.getLogger().log( str( model ) ))
-	#controller.show()
-	
 	#initiate new results table
 	rt = ResultsTable()
 	
@@ -226,10 +221,9 @@ for file in files:
 	IJ.showStatus("Detecting foci in image "+str(imageN)+" of a total of "+ str(totalN)+"")
 	IJ.showProgress(imageN,totalN)
 	filename = file.getName()
-	filename=filename.split("_")
+	filename=filename.split(".")
 	imp = IJ.openImage(file.getAbsolutePath())
 	trackFoci(outputFolder,filename[0],imp,spotDetector)
 	imp.changes = False
 	imp.close()
-
 
