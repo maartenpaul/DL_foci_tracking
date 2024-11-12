@@ -10,6 +10,10 @@
 #@ Boolean (label="Register nuclei in track stacks?", value=true) registerNucleus
 #@ Boolean (label="Use label map instead of StarDist?", value=false) useLabelMap
 #@ String (label="Label map suffix", value="_prediction.tif", required=false) labelMapSuffix
+#@ String (label = "Segmentation method", choices={"DoG spot detector", "Ilastik segmentation"}, style="listBox") spotDetector
+#@ Integer (label="Class index",min=1,max=10, value=1) classIndex
+#@ String (value="Ilastik spot detector options", visibility="MESSAGE",required=false) IlastikMessage
+#@ File (label="Select Ilastik model file",style="file",default="C:/") modelFolder
 #@ Double (label="Foci spot diameter (μm)", value=0.5) spotDiameter
 #@ Double (label="Foci quality threshold", value=50.0) spotQuality
 #@ Double (label="Foci linking max distance (μm)", value=1.0) maxDistance
@@ -148,13 +152,13 @@ def processTrack(track, trackID, fociCSV, rt) {
 
 def runFociTracking(trackStackPath, fociOutputFolder, spotID) {
     def scriptPath = "script:C:\\Fiji.app\\scripts\\My Plugins\\Ubuntu\\MP_TrackFoci_batch_Trackmate.py"
-    def modelFolder = new File("C:\\")  // Default model folder path
-    def classIndex = 1  // Default class index for spot detection
+    // def modelFolder = new File("C:\\")  // Default model folder path
+    // def classIndex = 1  // Default class index for spot detection
     def command = String.format(Locale.US,
         "files=[%s] " +
         "outputfolder=[%s] " +
         "targetchannel=%d " +
-        "spotdetector=[DoG spot detector] " +
+        "spotdetector=[%s] " +
         "spotdiameter=%.1f " +
         "spotquality=%.1f " +
         "modelfolder=[%s] " +  // Changed to use format specifier
@@ -166,6 +170,7 @@ def runFociTracking(trackStackPath, fociOutputFolder, spotID) {
         trackStackPath,
         fociOutputFolder.absolutePath,
         fociChannel,
+        spotDetector,
         spotDiameter,
         spotQuality,
         modelFolder.absolutePath,

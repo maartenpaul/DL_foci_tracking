@@ -226,4 +226,3 @@ for file in files:
 	trackFoci(outputFolder,filename[0],imp,spotDetector)
 	imp.changes = False
 	imp.close()
-
