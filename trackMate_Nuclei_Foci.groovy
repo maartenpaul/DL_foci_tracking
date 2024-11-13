@@ -10,8 +10,10 @@
 #@ Boolean (label="Register nuclei in track stacks?", value=true) registerNucleus
 #@ Boolean (label="Use label map instead of StarDist?", value=false) useLabelMap
 #@ String (label="Label map suffix", value="_prediction.tif", required=false) labelMapSuffix
+#@ String (value="Foci detection", visibility="MESSAGE",required=false) FociMessage
+#@ Boolean (label="Track Foci in individual cells?", value=false) trackFoci
 #@ String (label = "Segmentation method", choices={"DoG spot detector", "Ilastik segmentation"}, style="listBox") spotDetector
-#@ Integer (label="Class index",min=1,max=10, value=1) classIndex
+#@ Integer (label="Class index",min=0,max=10, value=1) classIndex
 #@ String (value="Ilastik spot detector options", visibility="MESSAGE",required=false) IlastikMessage
 #@ File (label="Select Ilastik model file",style="file",default="C:/") modelFolder
 #@ Double (label="Foci spot diameter (μm)", value=0.5) spotDiameter
@@ -32,6 +34,8 @@ import fiji.plugin.trackmate.Settings
 import fiji.plugin.trackmate.TrackMate
 import fiji.plugin.trackmate.SelectionModel
 import fiji.plugin.trackmate.Logger
+import fiji.plugin.trackmate.io.TmXmlWriter
+import fiji.plugin.trackmate.io.CSVExporter
 import fiji.plugin.trackmate.detection.LabelImageDetectorFactory
 import fiji.plugin.trackmate.detection.DogDetectorFactory
 import fiji.plugin.trackmate.stardist.StarDistDetectorFactory
@@ -52,6 +56,8 @@ import java.io.File
 import java.util.ArrayList
 import java.io.FileReader
 import ij.plugin.ChannelSplitter
+import fiji.plugin.trackmate.visualization.table.TrackTableView
+
 
 // New method to read CSV once and return frame counts map
 def getFociCountsMap(File csvFile, int startFrame) {
@@ -118,36 +124,6 @@ def getFociCountsMap(File csvFile, int startFrame) {
         logError("Error processing foci CSV: ${e.message}")
     }
     return frameCounts
-}
-
-// Modified main processing section
-def processTrack(track, trackID, fociCSV, rt) {
-    def startFrame = track[0].getFeature('FRAME') as int
-    
-    // Read foci counts once for all frames
-    def frameCounts = getFociCountsMap(fociCSV, startFrame)
-    
-    track.each { nucleus ->
-        def frameSpot = nucleus.getFeature('FRAME') as int
-        def nucleusId = nucleus.ID()
-        
-        try {
-            // Get cached foci count for this frame
-            def fociCount = frameCounts[frameSpot - startFrame] ?: 0
-            
-            // Add to results table
-            rt.incrementCounter()
-            rt.addValue("Track ID", trackID)
-            rt.addValue("Spot ID", nucleusId)
-            rt.addValue("Frame", frameSpot)
-            rt.addValue("X", nucleus.getFeature('POSITION_X'))
-            rt.addValue("Y", nucleus.getFeature('POSITION_Y'))
-            rt.addValue("Area", nucleus.getFeature('AREA'))
-            rt.addValue("Foci Count", fociCount)
-        } catch (Exception e) {
-            logError("Error processing nucleus ${nucleusId} in frame ${frameSpot}: ${e.message}")
-        }
-    }
 }
 
 def runFociTracking(trackStackPath, fociOutputFolder, spotID) {
@@ -329,7 +305,9 @@ def processImage(imp) {
 }
 
 // Process file
-def processFile(file) {
+def processFile(file,trackFoci) {
+    // Initialize ResultsTable
+    def rt = new ResultsTable()
     logInfo("Processing file: ${file.absolutePath}")
     
     def imp = IJ.openImage(file.absolutePath)
@@ -381,7 +359,7 @@ def processFile(file) {
     settings.trackerFactory = new OverlapTrackerFactory()
     settings.trackerSettings = [
         IOU_CALCULATION: "PRECISE",
-        MIN_IOU: 0.5 as Double,
+        MIN_IOU: 0.2 as Double,
         SCALE_FACTOR: 1.0 as Double
     ]
     
@@ -401,12 +379,12 @@ def processFile(file) {
     def ds = DisplaySettingsIO.readUserDefault()
     
     // Save label image
-    def labelImp = LabelImgExporter.createLabelImagePlus(trackmate, false, true, 
-                   LabelImgExporter.LabelIdPainting.LABEL_IS_TRACK_ID)
-    labelImp.show()
-    IJ.run(labelImp, "Size...", "width=${imp.width} height=${imp.height} constrain interpolation=None")
-    IJ.saveAsTiff(labelImp, new File(fileOutputFolder, "labelmap.tif").absolutePath)
-    labelImp.close()
+   // def labelImp = LabelImgExporter.createLabelImagePlus(trackmate, false, true, 
+   //                LabelImgExporter.LabelIdPainting.LABEL_IS_TRACK_ID)
+   // labelImp.show()
+   // IJ.run(labelImp, "Size...", "width=${imp.width} height=${imp.height} constrain interpolation=None")
+   // IJ.saveAsTiff(labelImp, new File(fileOutputFolder, "labelmap.tif").absolutePath)
+   // labelImp.close()
     
     // Project tracks on original image
     imp.show()
@@ -418,67 +396,154 @@ def processFile(file) {
     displayer.render()
     displayer.refresh()
     
-    // Process individual tracks
-    def rt = new ResultsTable()
+    // Initialize RoiManager once at the start
+    def rm = RoiManager.getInstance()
+    if (rm == null) {
+        rm = new RoiManager()
+    }
+    rm.reset()
+    
+    // Define frame property
     def frame = new Frame()
     
+    // Process individual tracks
     model.getTrackModel().trackIDs(true).each { trackID ->
         selectionModel.clearSelection()
         def track = new ArrayList(model.getTrackModel().trackSpots(trackID))
-        def spot = track[0]
-        def spotID = spot.ID()
-        selectionModel.addSpotToSelection(spot)
         
-        // Extract track stack
-        def ETSA = new ExtractTrackStackActionMP()
-        def disp = new DisplaySettings()
-        def stackTrack = ETSA.execute(trackmate, selectionModel, disp, frame)
-        def impStack = IJ.getImage()
-        
-        // Save track stack
-        def trackStackPath = new File(fileOutputFolder, "${spotID}stack.tif").absolutePath
-        IJ.saveAsTiff(impStack, trackStackPath)
-        
-        // Create folder for foci results
-        def fociOutputFolder = new File(fileOutputFolder, "foci_${spotID}")
-        fociOutputFolder.mkdirs()
-        
-        // Run foci tracking
-        runFociTracking(trackStackPath, fociOutputFolder, spotID)
-        
-        // Get first frame and read foci counts once
-        def startFrame = track[0].getFeature('FRAME') as int
-        def fociCSV = new File(fociOutputFolder, "${spotID}stackFociTracks.txt")
-        def frameCounts = getFociCountsMap(fociCSV, startFrame)
-        
-        // Process each nucleus using cached counts
-        track.each { nucleus ->
-            def frameSpot = nucleus.getFeature('FRAME') as int
-            def nucleusId = nucleus.ID()
-            
-            try {
-                def fociCount = frameCounts[frameSpot - startFrame] ?: 0
-                
-                rt.incrementCounter()
-                rt.addValue("Track ID", trackID)
-                rt.addValue("Spot ID", nucleusId)
-                rt.addValue("Frame", frameSpot)
-                rt.addValue("X", nucleus.getFeature('POSITION_X'))
-                rt.addValue("Y", nucleus.getFeature('POSITION_Y'))
-                rt.addValue("Area", nucleus.getFeature('AREA'))
-                rt.addValue("Foci Count", fociCount)
-            } catch (Exception e) {
-                logError("Error processing nucleus ${nucleusId} in frame ${frameSpot}: ${e.message}")
-            }
+        // Validate track
+        if (track.isEmpty()) {
+            logError("Empty track found for trackID: ${trackID}")
+            return
         }
         
-        impStack.close()
+        def spot = track[0]
+        def spotID = spot.ID()
+        
+        try {
+            // Clear any existing windows
+            
+            selectionModel.addSpotToSelection(spot)
+            
+            // Extract track stack with validation
+            def ETSA = new ExtractTrackStackActionMP()
+            def disp = new DisplaySettings()
+            
+            // Ensure stack index is within valid range
+            def stackTrack = ETSA.execute(trackmate, selectionModel, disp, frame)
+            def impStack = WindowManager.getCurrentImage()
+            
+            if (impStack == null || impStack.getStackSize() < 1) {
+                logError("Invalid stack created for track ${trackID}")
+                return
+            }
+            
+            // Log stack info
+            logInfo("Track ${trackID}: Stack size = ${impStack.getStackSize()}")
+            
+            // Save track stack
+            def trackStackPath = new File(fileOutputFolder, "${spotID}stack.tif").absolutePath
+            IJ.saveAsTiff(impStack, trackStackPath)
+            
+            // Process foci if needed
+            if (trackFoci) {
+                runFociTracking(trackStackPath, fociOutputFolder, spotID)
+                
+                // Get first frame and read foci counts once
+                def startFrame = track[0].getFeature('FRAME') as int
+                def fociCSV = new File(fociOutputFolder, "${spotID}stackFociTracks.txt")
+                def frameCounts = getFociCountsMap(fociCSV, startFrame)
+            } else {
+                def fociCount = 0
+            }
+            
+            // Process each nucleus using cached counts
+            track.each { nucleus ->
+                def frameSpot = nucleus.getFeature('FRAME') as int
+                def nucleusId = nucleus.ID()
+                
+                try {
+
+                    
+                    rt.incrementCounter()
+                    rt.addValue("Track ID", trackID)
+                    rt.addValue("Spot ID", nucleusId)
+                    rt.addValue("Frame", frameSpot)
+                    rt.addValue("X", nucleus.getFeature('POSITION_X'))
+                    rt.addValue("Y", nucleus.getFeature('POSITION_Y'))
+                    rt.addValue("Area", nucleus.getFeature('AREA'))
+                    if (trackFoci) {
+                    	def fociCount = frameCounts[frameSpot - startFrame] ?: 0
+                    	rt.addValue("Foci Count", fociCount)
+                    }
+                } catch (Exception e) {
+                    logError("Error processing nucleus ${nucleusId} in frame ${frameSpot}: ${e.message}")
+                }
+            }
+            
+            impStack.close()
+        } catch (Exception e) {
+            logError("Error processing track ${trackID}: ${e.message}")
+        }
     }
+
+    // After track processing but before final cleanup:
+    try {
+        // Clear existing ROIs
+        rm.reset()
+
+        // Export all spots to ROIs
+        def spots = model.getSpots().iterable(true)
+        def exporter = new IJRoiExporter(imp, model.getLogger())
+        exporter.export(spots)
+
+        // Save all ROIs
+        if (rm.getCount() > 0) {
+            rm.runCommand("Select All")
+            def movieName = file.getName().take(file.getName().lastIndexOf('.'))
+            def roiZipPath = new File(fileOutputFolder, "${movieName}_AllROIs.zip")
+            rm.runCommand("Save", roiZipPath.absolutePath)
+        }
+        rm.reset()
+    } catch (Exception e) {
+        logError("Error saving ROIs: ${e.message}")
+    }
+
+    // Continue with table exports
+    def spotTable = TrackTableView.createSpotTable(model, ds)
+    spotTable.exportToCsv(new File(fileOutputFolder, "all_track_spots.csv"))
     
+	def only_visible = false
+	// If you set this flag to False, it will include all the spots,
+	// the ones not in tracks, and the ones not visible.
+	CSVExporter.exportSpots( new File(fileOutputFolder, "all_nuclei_spots.csv").absolutePath, model, only_visible )
+
+    def trackTable = TrackTableView.createTrackTable(model, ds)
+    trackTable.exportToCsv(new File(fileOutputFolder, "all_nuclei_tracks.csv"))
+	if (trackFoci) {
     // Save results
-    rt.save(new File(fileOutputFolder, "combined_results.csv").absolutePath)
-    fociCollector.finalize()
+    	rt.save(new File(fileOutputFolder, "combined_results.csv").absolutePath)
+    	fociCollector.finalize()
+	}
     
+    // After all tracks are processed, save combined ROIs
+    // Add this before final cleanup:
+    try {
+        if (rm != null && rm.getCount() > 0) {
+            rm.runCommand("Select All")
+            def movieName = file.getName().take(file.getName().lastIndexOf('.'))
+            def roiPath = new File(fileOutputFolder, "${movieName}_AllROIs.zip")
+            rm.runCommand("Save", roiPath.absolutePath)
+        }
+        rm.reset()
+    } catch (Exception e) {
+        logError("Error saving combined ROIs: ${e.message}")
+    }
+    def outFile_TMXML = new File(fileOutputFolder, "nuclei_XML.xml")
+	def writer = new TmXmlWriter(outFile_TMXML) //a File path object
+	writer.appendModel(trackmate.getModel()) //trackmate instantiate like this before trackmate = TrackMate(model, settings)
+	writer.appendSettings(trackmate.getSettings())
+	writer.writeToFile()
     // Cleanup
     imp.close()
     impTemp.close()
@@ -490,7 +555,7 @@ def processFile(file) {
 // Main execution
 if (validateInputs()) {
     input_files.each { file ->
-        processFile(file)
+        processFile(file,trackFoci)
     }
     logInfo("All files processed. Results saved in ${outputfolder.absolutePath}")
 } else {
